@@ -4,9 +4,11 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <netdb.h>
 
 #define SMTP_PORT 25
-#define GMAIL_SMTP_IP "smtp.gmail.com"
+#define SMTP_TLS_PORT 587
+#define GMAIL_SMTP_NAME "smtp.gmail.com"
 #define MAX_LINE_LEN 100
 #define MAX_USER_LEN 50
 #define MAX_PASS_LEN 50
@@ -220,18 +222,30 @@ int main(int argc, char *argv[])
     }
     printf("Socket created successfully.\n");
 
+    // get host ip
+    struct hostent *host = gethostbyname(GMAIL_SMTP_NAME);
+
+    if (host == NULL)
+    {
+        printf("Failed to get host from %s\n", GMAIL_SMTP_NAME);
+        exit(EXIT_FAILURE);
+    }
+
     // creating server address struct
     struct sockaddr_in serverAddress;
     memset(&serverAddress, 0, sizeof(serverAddress));
     serverAddress.sin_family = AF_INET;
-    serverAddress.sin_port = htons(SMTP_PORT);
+    serverAddress.sin_port = htons(SMTP_TLS_PORT);
+    memcpy(&serverAddress.sin_addr.s_addr, host->h_addr_list[0], host->h_length);
 
-    // get binary network format from server ip string
-    if (inet_pton(AF_INET, GMAIL_SMTP_IP, &serverAddress.sin_addr) <= 0)
+    // connect to server
+    if (connect(socketFd, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
     {
-        printf("Server address is invalid.\n");
+        printf("Failed to connect to server.\n");
+        closeSocket();
         exit(EXIT_FAILURE);
     }
+    printf("Successfully connected to server\n");
 
     exit(EXIT_SUCCESS);
 }
