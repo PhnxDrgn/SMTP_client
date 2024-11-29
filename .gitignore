@@ -1,4 +1,7 @@
 build
 
+# vs code files
+.vscode/*
+
 # secret config file
 credentials.config
