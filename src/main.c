@@ -9,14 +9,9 @@
 
 #define SMTP_PORT 25
 #define SMTP_SERVER_IP "192.168.0.3"
-#define MAX_LINE_LEN 100
-#define MAX_USER_LEN 50
-#define MAX_PASS_LEN 50
 #define BUFFER_SIZE 1024
 
 int socketFd = 0;
-char user[MAX_USER_LEN] = "\0";
-char pass[MAX_PASS_LEN] = "\0";
 
 /**
  * Function to close the socket
@@ -83,103 +78,6 @@ void signalHandler(int sig)
 }
 
 /**
- * Function to remove leading and trailing spaces from a string
- * str: pointer to char buffer with string to be trimmed
- */
-void trim(char *str)
-{
-    int start = 0, end = strlen(str) - 1;
-
-    // remove leading spaces
-    while (str[start] == ' ')
-    {
-        start++;
-    }
-
-    // remove trailing spaces
-    while (end >= start && (str[end] == ' ' || str[end] == '\n' || str[end] == '\r'))
-    {
-        end--;
-    }
-
-    // calculate string len
-    int len = end - start + 1;
-
-    // shift the string to the left to remove leading spaces
-    for (int ii = 0; ii < len; ii++)
-    {
-        str[ii] = str[start + ii];
-    }
-
-    // null-terminate the string
-    str[len] = '\0';
-}
-
-/**
- * Function to read in the config file
- * filePath: pointer to string name for file path
- * return: 0 if successful, -1 if failed
- */
-int readCredentials(char *filePath)
-{
-    char line[MAX_LINE_LEN] = "\0";
-    FILE *file = fopen(filePath, "r");
-
-    if (file == NULL)
-    {
-        printf("Failed to read config file %s", filePath);
-        return -1;
-    }
-
-    // reset user and pass vars
-    user[0] = '\0';
-    pass[0] = '\0';
-
-    // read configs line by line
-    while (fgets(line, MAX_LINE_LEN, file))
-    {
-        char *key;
-        char *value;
-
-        // trim leading an trailing spaces
-        trim(line);
-
-        // ignore comments
-        if (line[0] == '#')
-            continue;
-
-        // valid key values will have : between. Find splitter
-        char *splitPtr = strchr(line, ':');
-
-        if (splitPtr != NULL)
-        {
-            // null terminate at the split
-            *splitPtr = '\0';
-
-            // set key and value
-            key = line;
-            value = splitPtr + 1;
-
-            // trim key and value
-            trim(key);
-            trim(value);
-
-            // check for user and pass
-            if (strcmp(key, "user") == 0)
-            {
-                strncpy(user, value, sizeof(user));
-            }
-            else if (strcmp(key, "pass") == 0)
-            {
-                strncpy(pass, value, sizeof(pass));
-            }
-        }
-    }
-
-    return 0;
-}
-
-/**
  * Function to send command to server
  * socket: socket descriptor for server
  * buffer: data to send to server
@@ -240,25 +138,6 @@ int main(int argc, char *argv[])
     signal(SIGINT, signalHandler);
 
     printf("********************SMTP Client********************\n");
-
-    // read in credentials
-    printf("Reading credentials.\n");
-    if (readCredentials("credentials.config") != 0)
-    {
-        exit(EXIT_FAILURE);
-    }
-
-    // check if user and pass are read
-    if (strlen(user) == 0)
-    {
-        printf("Failed to read user.\n");
-        exit(EXIT_FAILURE);
-    }
-    if (strlen(pass) == 0)
-    {
-        printf("Failed to read pass.\n");
-        exit(EXIT_FAILURE);
-    }
 
     // creating socket
     socketFd = socket(AF_INET, SOCK_STREAM, 0);
