@@ -6,10 +6,19 @@
 #include <string.h>
 #include <netdb.h>
 #include <stdbool.h>
+#include <termio.h>
 
 #define SMTP_PORT 25
 #define SMTP_SERVER_IP "192.168.0.3"
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE (1024 * 16) // 16 kB of buffer space
+
+typedef struct
+{
+    char from[256];
+    char to[256];
+    char subject[256];
+    char body[(1024 * 8)];
+} mailData_t;
 
 int socketFd = 0;
 
@@ -82,6 +91,7 @@ void signalHandler(int sig)
  * socket: socket descriptor for server
  * buffer: data to send to server
  * hideCommand: flag to hide print out of failed command
+ * expectedResponse: int value expected. If 0, no response expected.
  * return: 0 for success or -1 for failure
  */
 int sendCommand(int socket, char *cmd, bool hideCommand, int expectedResponse)
@@ -97,30 +107,159 @@ int sendCommand(int socket, char *cmd, bool hideCommand, int expectedResponse)
         return -1;
     }
 
-    // read response
-    char buffer[BUFFER_SIZE];
-    int len = read(socket, buffer, sizeof(buffer) - 1);
-    buffer[len] = '\0';
-    if (len < 0)
+    if (expectedResponse > 0)
     {
-        printf("Failed to read reply to command.\n");
-        return -1;
-    }
+        // read response
+        char buffer[BUFFER_SIZE];
+        int len = read(socket, buffer, sizeof(buffer) - 1);
+        buffer[len] = '\0';
+        if (len < 0)
+        {
+            printf("Failed to read reply to command.\n");
+            return -1;
+        }
 
-    printf("Server response: %s\n", buffer);
+        printf("Server response: %s\n", buffer);
 
-    char responseCpy[4];
-    strncpy(responseCpy, buffer, sizeof(responseCpy) - 1);
-    responseCpy[sizeof(responseCpy) - 1] = '\0';
-    int responseCode = atoi(responseCpy);
+        char responseCpy[4];
+        strncpy(responseCpy, buffer, sizeof(responseCpy) - 1);
+        responseCpy[sizeof(responseCpy) - 1] = '\0';
+        int responseCode = atoi(responseCpy);
 
-    if (responseCode != expectedResponse)
-    {
-        printf("Response does not match expected response of %d.\n", expectedResponse);
-        return -1;
+        if (responseCode != expectedResponse)
+        {
+            printf("Response does not match expected response of %d.\n", expectedResponse);
+            return -1;
+        }
     }
 
     return 0;
+}
+
+void initMailData(mailData_t *data)
+{
+    data->from[0] = '\0';
+    data->to[0] = '\0';
+    data->subject[0] = '\0';
+    data->body[0] = '\0';
+}
+
+void printMailData(mailData_t data)
+{
+    printf("\nFrom: %s\n", data.from);
+    printf("To: %s\n", data.to);
+    printf("Subject: %s\n", data.subject);
+    if (strlen(data.body) > 0)
+        printf("\n%s\n", data.body);
+    printf("\n");
+}
+
+void clearInputBuffer()
+{
+    char c;
+    while ((c = getchar()) != '\n' && c != EOF)
+        ;
+}
+
+mailData_t getMailDataFromUser()
+{
+    mailData_t data;
+    initMailData(&data);
+    FILE *file; // file for body text
+    int br = 0; // number of bytes read
+
+    char options[] = {"\n1) set from email\n2) set to email\n3) set subject\n4) select body txt file\n5) done\n\n"};
+
+    bool done = false;
+
+    char bodyBuffer[2] = {'\0', '\0'};
+
+    while (!done)
+    {
+        // create buffer for options
+        char inputBuffer[256];
+        memset(inputBuffer, '\0', 256);
+
+        // show options
+        printf("%s", options);
+
+        // read in first char (input should only be 1 char)
+        scanf("%1s", inputBuffer);
+        inputBuffer[1] = '\0';
+        clearInputBuffer();
+
+        // add new line to make terminal look better
+        printf("\n");
+
+        // get option as int
+        int selected = atoi(inputBuffer);
+
+        switch (selected)
+        {
+        case 1: // get from email
+            printf("from: ");
+            scanf("%63s", inputBuffer);
+            clearInputBuffer();
+            strncpy(data.from, inputBuffer, sizeof(data.from));
+            printf("\n");
+            printMailData(data);
+            break;
+        case 2: // get to email
+            printf("to: ");
+            scanf("%63s", inputBuffer);
+            clearInputBuffer();
+            strncpy(data.to, inputBuffer, sizeof(data.to));
+            printf("\n");
+            printMailData(data);
+            break;
+        case 3: // get subject
+            printf("subject: ");
+            fgets(inputBuffer, sizeof(inputBuffer), stdin);
+            inputBuffer[strcspn(inputBuffer, "\n")] = '\0'; // remove newline char
+            strncpy(data.subject, inputBuffer, sizeof(data.subject));
+            printf("\n");
+            printMailData(data);
+            break;
+        case 4: // get body
+            // reset body text
+            data.body[0] = '\0';
+
+            printf("path to body text: ");
+
+            // get file path from user
+            scanf("%255s", inputBuffer);
+            clearInputBuffer();
+
+            file = fopen(inputBuffer, "r");
+
+            if (file == NULL)
+            {
+                printf("Failed to open body text file.\n");
+                break;
+            }
+
+            br = fread(data.body, sizeof(char), sizeof(data.body) - 1, file);
+
+            if (br < 0)
+            {
+                printf("Failed to read contexts of file.\n");
+            }
+
+            data.body[br] = '\0'; // null terminate just in case
+
+            fclose(file);
+
+            printMailData(data);
+            break;
+        case 5:
+            done = true;
+            break;
+        default:
+            printf("Invalid option selected: %s\n", inputBuffer);
+        }
+    }
+
+    return data;
 }
 
 int main(int argc, char *argv[])
@@ -138,6 +277,9 @@ int main(int argc, char *argv[])
     signal(SIGINT, signalHandler);
 
     printf("********************SMTP Client********************\n");
+
+    mailData_t mailData = getMailDataFromUser();
+    char cmdBuffer[BUFFER_SIZE];
 
     // creating socket
     socketFd = socket(AF_INET, SOCK_STREAM, 0);
@@ -175,6 +317,48 @@ int main(int argc, char *argv[])
 
     // send EHLO to introduce and set domain. Expecting 250 command completed
     if (sendCommand(socketFd, "EHLO umd.edu\r\n", false, 250) < 0)
+        exit(EXIT_FAILURE);
+
+    // send MAIL FROM to set sender email. Expecting 250 command completed
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "MAIL FROM:<%s>\r\n", mailData.from);
+    if (sendCommand(socketFd, cmdBuffer, false, 250) < 0)
+        exit(EXIT_FAILURE);
+
+    // send RCPT TO to set receiver email. Expecting 250 command completed
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "RCPT TO:<%s>\r\n", mailData.to);
+    if (sendCommand(socketFd, cmdBuffer, false, 250) < 0)
+        exit(EXIT_FAILURE);
+
+    // send DATA to set receiver email. Expecting 354 server confirm email addresses
+    if (sendCommand(socketFd, "DATA\r\n", false, 354) < 0)
+        exit(EXIT_FAILURE);
+
+    // set subject segment. no response expected.
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "Subject: %s\r\n", mailData.subject);
+    if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // set from email. no response expected.
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "From: %s\r\n", mailData.from);
+    if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // set to email. no response expected.
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "To: %s\r\n", mailData.to);
+    if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // end header section. no response expected.
+    if (sendCommand(socketFd, "\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // set body. no response expected.
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "%s\r\n", mailData.body);
+    if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // finish data section. Expect 250 as command complete.
+    if (sendCommand(socketFd, ".\r\n", false, 250) < 0)
         exit(EXIT_FAILURE);
 
     // send QUIT to gracefully close connection. Expecting 221 close connection confirm

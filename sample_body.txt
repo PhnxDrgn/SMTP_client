@@ -1,0 +1,6 @@
+Dear receiver of this email,
+
+This is a sample body message for this email.
+
+Sincerely,
+Sender
