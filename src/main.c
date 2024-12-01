@@ -451,35 +451,39 @@ int main(int argc, char *argv[])
     if (sendCommand(socketFd, "\r\n", false, 0) < 0)
         exit(EXIT_FAILURE);
 
-    // set boundary for png attachment
-    if (sendCommand(socketFd, "--dataBoundary\r\n", false, 0) < 0)
-        exit(EXIT_FAILURE);
+    // section that is added only if there is an attachment
+    if (strlen(mailData.attachmentName) > 0)
+    {
+        // set boundary for png attachment
+        if (sendCommand(socketFd, "--dataBoundary\r\n", false, 0) < 0)
+            exit(EXIT_FAILURE);
 
-    // set content type and name. no response expected.
-    snprintf(cmdBuffer, sizeof(cmdBuffer), "Content-Type: image/png; name=\"%s\"\r\n", mailData.attachmentName);
-    if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
-        exit(EXIT_FAILURE);
+        // set content type and name. no response expected.
+        snprintf(cmdBuffer, sizeof(cmdBuffer), "Content-Type: image/png; name=\"%s\"\r\n", mailData.attachmentName);
+        if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
+            exit(EXIT_FAILURE);
 
-    // defining encoding for this bounded section
-    if (sendCommand(socketFd, "Content-Transfer-Encoding: base64\r\n", false, 0) < 0)
-        exit(EXIT_FAILURE);
+        // defining encoding for this bounded section
+        if (sendCommand(socketFd, "Content-Transfer-Encoding: base64\r\n", false, 0) < 0)
+            exit(EXIT_FAILURE);
 
-    // defining disposition for this bounded section
-    snprintf(cmdBuffer, sizeof(cmdBuffer), "Content-Disposition: attachment; filename=\"%s\"\r\n", mailData.attachmentName);
-    if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
-        exit(EXIT_FAILURE);
+        // defining disposition for this bounded section
+        snprintf(cmdBuffer, sizeof(cmdBuffer), "Content-Disposition: attachment; filename=\"%s\"\r\n", mailData.attachmentName);
+        if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
+            exit(EXIT_FAILURE);
 
-    // end boundary description for this text section. no response expected.
-    if (sendCommand(socketFd, "\r\n", false, 0) < 0)
-        exit(EXIT_FAILURE);
+        // end boundary description for this text section. no response expected.
+        if (sendCommand(socketFd, "\r\n", false, 0) < 0)
+            exit(EXIT_FAILURE);
 
-    // send encoded attachment
-    if (sendCommand(socketFd, mailData.encodedAttachment, true, 0) < 0)
-        exit(EXIT_FAILURE);
+        // send encoded attachment
+        if (sendCommand(socketFd, mailData.encodedAttachment, true, 0) < 0)
+            exit(EXIT_FAILURE);
 
-    // end png section. no response expected.
-    if (sendCommand(socketFd, "\r\n", false, 0) < 0)
-        exit(EXIT_FAILURE);
+        // end png section. no response expected.
+        if (sendCommand(socketFd, "\r\n", false, 0) < 0)
+            exit(EXIT_FAILURE);
+    }
 
     // set final boundary. no response expected.
     if (sendCommand(socketFd, "--dataBoundary--\r\n", false, 0) < 0)
