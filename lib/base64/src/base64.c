@@ -1,3 +1,5 @@
+/* Source Code Found from https://stackoverflow.com/questions/342409/how-do-i-base64-encode-decode-in-c */
+
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -88,7 +90,6 @@ unsigned char *base64_decode(const char *data,
 
 void build_decoding_table()
 {
-
     decoding_table = malloc(256);
 
     for (int i = 0; i < 64; i++)

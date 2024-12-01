@@ -16,6 +16,7 @@ add_executable(smtp_client
 # link libaraies
 target_link_libraries(smtp_client
     OpenSSL::SSL
+    base64
 )
 
 # add includes
