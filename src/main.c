@@ -456,7 +456,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
 
     // set content type and name. no response expected.
-    snprintf(cmdBuffer, sizeof(cmdBuffer), "Content-Type: image/png; name=\"%s\"", mailData.attachmentName);
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "Content-Type: image/png; name=\"%s\"\r\n", mailData.attachmentName);
     if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
         exit(EXIT_FAILURE);
 
@@ -474,16 +474,16 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
 
     // send encoded attachment
-    if (sendCommand(socketFd, mailData.encodedAttachment, false, 0) < 0)
+    if (sendCommand(socketFd, mailData.encodedAttachment, true, 0) < 0)
         exit(EXIT_FAILURE);
 
     // end png section. no response expected.
     if (sendCommand(socketFd, "\r\n", false, 0) < 0)
         exit(EXIT_FAILURE);
 
-    // // set final boundary. no response expected.
-    // if (sendCommand(socketFd, "--dataBoundary--\r\n", false, 0) < 0)
-    //     exit(EXIT_FAILURE);
+    // set final boundary. no response expected.
+    if (sendCommand(socketFd, "--dataBoundary--\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
 
     // finish data section. Expect 250 as command complete.
     if (sendCommand(socketFd, ".\r\n", false, 250) < 0)
