@@ -7,17 +7,20 @@
 #include <netdb.h>
 #include <stdbool.h>
 #include <termio.h>
+#include <base64.h>
 
 #define SMTP_PORT 25
 #define SMTP_SERVER_IP "192.168.0.3"
-#define BUFFER_SIZE (1024 * 16) // 16 kB of buffer space
+#define BUFFER_SIZE (1024 * 512) // 512 kB of buffer space
 
 typedef struct
 {
     char from[256];
     char to[256];
     char subject[256];
-    char body[(1024 * 8)];
+    char body[BUFFER_SIZE];
+    char attachmentName[256];
+    char encodedAttachment[BUFFER_SIZE];
 } mailData_t;
 
 int socketFd = 0;
@@ -141,7 +144,9 @@ void initMailData(mailData_t *data)
     data->from[0] = '\0';
     data->to[0] = '\0';
     data->subject[0] = '\0';
-    data->body[0] = '\0';
+    memset(data->body, '\0', sizeof(data->body));
+    memset(data->attachmentName, '\0', sizeof(data->attachmentName));
+    memset(data->encodedAttachment, '\0', sizeof(data->encodedAttachment));
 }
 
 void printMailData(mailData_t data)
@@ -149,6 +154,10 @@ void printMailData(mailData_t data)
     printf("\nFrom: %s\n", data.from);
     printf("To: %s\n", data.to);
     printf("Subject: %s\n", data.subject);
+    if (strlen(data.attachmentName) > 0)
+    {
+        printf("Attachment: %s\n", data.attachmentName);
+    }
     if (strlen(data.body) > 0)
         printf("\n%s\n", data.body);
     printf("\n");
@@ -168,7 +177,7 @@ mailData_t getMailDataFromUser()
     FILE *file; // file for body text
     int br = 0; // number of bytes read
 
-    char options[] = {"\n1) set from email\n2) set to email\n3) set subject\n4) select body txt file\n5) done\n\n"};
+    char options[] = {"\n1) set from email\n2) set to email\n3) set subject\n4) select body txt file\n5) select png attachment\n6) done\n\n"};
 
     bool done = false;
 
@@ -176,9 +185,17 @@ mailData_t getMailDataFromUser()
 
     while (!done)
     {
-        // create buffer for options
-        char inputBuffer[256];
-        memset(inputBuffer, '\0', 256);
+        // create buffers
+        char inputBuffer[BUFFER_SIZE];
+        memset(inputBuffer, '\0', BUFFER_SIZE);
+        unsigned char rawAttachmentBuffer[BUFFER_SIZE];
+        memset(rawAttachmentBuffer, '\0', BUFFER_SIZE);
+
+        // attachment encoded size
+        size_t encodedAttachmentSize;
+
+        // encoded attachment pointer
+        char *encodedAttachment;
 
         // show options
         printf("%s", options);
@@ -222,7 +239,7 @@ mailData_t getMailDataFromUser()
             break;
         case 4: // get body
             // reset body text
-            data.body[0] = '\0';
+            memset(data.body, '\0', sizeof(data.body));
 
             printf("path to body text: ");
 
@@ -245,13 +262,62 @@ mailData_t getMailDataFromUser()
                 printf("Failed to read contexts of file.\n");
             }
 
-            data.body[br] = '\0'; // null terminate just in case
-
             fclose(file);
 
             printMailData(data);
             break;
-        case 5:
+        case 5: // get attachment
+            // reset attachment path text
+            memset(data.attachmentName, '\0', sizeof(data.attachmentName));
+
+            // get file path from user
+            printf("file name: ");
+            scanf("%255s", data.attachmentName);
+            clearInputBuffer();
+
+            // get file path from user
+            printf("path to png: ");
+            scanf("%255s", inputBuffer);
+            clearInputBuffer();
+
+            file = fopen(inputBuffer, "rb");
+
+            if (file == NULL)
+            {
+                printf("Failed to open attachment.\n");
+                break;
+            }
+
+            br = fread(rawAttachmentBuffer, sizeof(char), sizeof(rawAttachmentBuffer) - 1, file);
+            fclose(file);
+
+            if (br < 0)
+            {
+                printf("Failed to read contexts of attachment.\n");
+            }
+
+            if (br > sizeof(data.encodedAttachment))
+            {
+                printf("Attachment too large, max size is %ld bytes.", sizeof(data.encodedAttachment));
+
+                // reset attachment name
+                memset(data.attachmentName, '\0', sizeof(data.attachmentName));
+
+                break;
+            }
+
+            // encode attachment
+            encodedAttachment = base64_encode(rawAttachmentBuffer, br, &encodedAttachmentSize);
+
+            // copy encoded attachment
+            strncpy(data.encodedAttachment, encodedAttachment, sizeof(data.encodedAttachment));
+
+            // free encoded attachment memory
+            free(encodedAttachment);
+
+            printMailData(data);
+            break;
+        case 6:
             done = true;
             break;
         default:
@@ -279,7 +345,7 @@ int main(int argc, char *argv[])
     printf("********************SMTP Client********************\n");
 
     mailData_t mailData = getMailDataFromUser();
-    char cmdBuffer[BUFFER_SIZE];
+    char cmdBuffer[BUFFER_SIZE + 3]; // extra bytes to add \r\n
 
     // creating socket
     socketFd = socket(AF_INET, SOCK_STREAM, 0);
@@ -348,7 +414,31 @@ int main(int argc, char *argv[])
     if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
         exit(EXIT_FAILURE);
 
+    // set MIME version. no response expected.
+    if (sendCommand(socketFd, "MIME-Version: 1.0\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // set MIME version. no response expected.
+    if (sendCommand(socketFd, "Content-Type: multipart/mixed; boundary=\"dataBoundary\"\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
     // end header section. no response expected.
+    if (sendCommand(socketFd, "\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // set boundary for text portion of email. no response expected.
+    if (sendCommand(socketFd, "--dataBoundary\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // defining type for this bounded section
+    if (sendCommand(socketFd, "Content-Type: text/plain; charset=\"utf-8\"\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // defining encoding for this bounded section
+    if (sendCommand(socketFd, "Content-Transfer-Encoding: 7bit\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // end boundary description for this text section. no response expected.
     if (sendCommand(socketFd, "\r\n", false, 0) < 0)
         exit(EXIT_FAILURE);
 
@@ -356,6 +446,44 @@ int main(int argc, char *argv[])
     snprintf(cmdBuffer, sizeof(cmdBuffer), "%s\r\n", mailData.body);
     if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
         exit(EXIT_FAILURE);
+
+    // end text section. no response expected.
+    if (sendCommand(socketFd, "\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // set boundary for png attachment
+    if (sendCommand(socketFd, "--dataBoundary\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // set content type and name. no response expected.
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "Content-Type: image/png; name=\"%s\"", mailData.attachmentName);
+    if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // defining encoding for this bounded section
+    if (sendCommand(socketFd, "Content-Transfer-Encoding: base64\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // defining disposition for this bounded section
+    snprintf(cmdBuffer, sizeof(cmdBuffer), "Content-Disposition: attachment; filename=\"%s\"\r\n", mailData.attachmentName);
+    if (sendCommand(socketFd, cmdBuffer, false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // end boundary description for this text section. no response expected.
+    if (sendCommand(socketFd, "\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // send encoded attachment
+    if (sendCommand(socketFd, mailData.encodedAttachment, false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // end png section. no response expected.
+    if (sendCommand(socketFd, "\r\n", false, 0) < 0)
+        exit(EXIT_FAILURE);
+
+    // // set final boundary. no response expected.
+    // if (sendCommand(socketFd, "--dataBoundary--\r\n", false, 0) < 0)
+    //     exit(EXIT_FAILURE);
 
     // finish data section. Expect 250 as command complete.
     if (sendCommand(socketFd, ".\r\n", false, 250) < 0)
